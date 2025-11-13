@@ -1,0 +1,28 @@
+[Unit]
+Description=RAG Bot with GPT-OSS Integration
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/ragbot
+Environment=PATH=/home/pi/ragbot/venv/bin
+ExecStart=/home/pi/ragbot/venv/bin/python main.py
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ragbot
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/home/pi/ragbot/chroma_db /home/pi/ragbot/uploads /home/pi/ragbot/logs
+ProtectHome=read-only
+
+[Install]
+WantedBy=multi-user.target
