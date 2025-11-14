@@ -34,6 +34,16 @@ class WhatsAppBot:
             elif message_body == 'stats':
                 return self._get_stats_message()
             
+            elif message_body.startswith('research '):
+                # Research a topic
+                topic = message_body[9:].strip()
+                return self._research_topic(topic)
+            
+            elif message_body.startswith('scrape '):
+                # Scrape a URL
+                url = message_body[7:].strip()
+                return self._scrape_url(url)
+            
             else:
                 # Regular query
                 response = self.rag_system.query(message_body)
@@ -64,14 +74,16 @@ Type 'help' for more information or just ask me anything!
 • hello/hi - Get welcome message
 • help/? - Show this help
 • stats - Show knowledge base statistics
+• research <topic> - Research and learn about a topic
+• scrape <url> - Add content from a website
 
 *Usage:*
 Just send me any question about topics in the knowledge base!
 
 Examples:
 • "What is machine learning?"
-• "How does neural networks work?"
-• "Explain quantum computing"
+• "research artificial intelligence"
+• "scrape https://example.com/article"
 
 I'll search through all uploaded documents to find the best answer for you!
         """
@@ -96,6 +108,26 @@ Ready to answer your questions!
         resp = MessagingResponse()
         resp.message(response_text)
         return str(resp)
+    
+    def _research_topic(self, topic: str) -> str:
+        """Research a topic and add to knowledge base"""
+        try:
+            from web_research import WebResearcher
+            researcher = WebResearcher()
+            result = researcher.research_topic(topic)
+            return f"🔍 *Research Results:*\n\n{result}"
+        except Exception as e:
+            return f"Error researching topic: {str(e)}"
+    
+    def _scrape_url(self, url: str) -> str:
+        """Scrape URL and add to knowledge base"""
+        try:
+            from web_research import WebResearcher
+            researcher = WebResearcher()
+            result = researcher.add_url_to_knowledge_base(url)
+            return f"🌐 *Web Scraping:*\n\n{result}"
+        except Exception as e:
+            return f"Error scraping URL: {str(e)}"
     
     def send_message(self, to_number: str, message: str) -> bool:
         """Send a message via WhatsApp"""

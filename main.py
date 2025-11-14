@@ -111,6 +111,43 @@ async def get_stats():
         logger.error(f"Error getting stats: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/research/url")
+async def research_url(request: dict):
+    """Scrape a URL and add to knowledge base"""
+    try:
+        from web_research import WebResearcher
+        researcher = WebResearcher()
+        
+        url = request.get("url", "")
+        if not url:
+            raise HTTPException(status_code=400, detail="URL is required")
+        
+        result = researcher.add_url_to_knowledge_base(url)
+        return {"result": result, "url": url}
+    
+    except Exception as e:
+        logger.error(f"Error researching URL: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/research/topic")
+async def research_topic(request: dict):
+    """Research a topic and add to knowledge base"""
+    try:
+        from web_research import WebResearcher
+        researcher = WebResearcher()
+        
+        topic = request.get("topic", "")
+        if not topic:
+            raise HTTPException(status_code=400, detail="Topic is required")
+        
+        num_sources = request.get("num_sources", 3)
+        result = researcher.research_topic(topic, num_sources)
+        return {"result": result, "topic": topic}
+    
+    except Exception as e:
+        logger.error(f"Error researching topic: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 # Slack integration
 if slack_bot:
     @app.post("/slack/events")
