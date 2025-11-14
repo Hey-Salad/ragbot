@@ -165,10 +165,17 @@ if whatsapp_bot:
             from_number = form_data.get("From", "").replace("whatsapp:", "")
             message_body = form_data.get("Body", "")
             
-            logger.info(f"WhatsApp message from {from_number}: {message_body}")
+            # Check for media attachments
+            media_url = form_data.get("MediaUrl0", None)
+            media_type = form_data.get("MediaContentType0", None)
             
-            # Process message
-            response_text = whatsapp_bot.handle_message(from_number, message_body)
+            if media_url:
+                logger.info(f"WhatsApp media from {from_number}: {media_type}")
+            else:
+                logger.info(f"WhatsApp message from {from_number}: {message_body}")
+            
+            # Process message with optional media
+            response_text = whatsapp_bot.handle_message(from_number, message_body, media_url, media_type)
             
             # Return TwiML response
             twiml_response = whatsapp_bot.create_twiml_response(response_text)

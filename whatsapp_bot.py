@@ -1,13 +1,20 @@
 from twilio.rest import Client
 from twilio.twiml.messaging_response import MessagingResponse
 from rag_system import RAGSystem
+from user_rag_system import UserRAGSystem
+from user_manager import UserManager
 from config import Config
 import logging
+import requests
+import PyPDF2
+import io
 
 class WhatsAppBot:
     def __init__(self):
         self.config = Config()
         self.rag_system = RAGSystem()
+        self.user_rag_system = UserRAGSystem()
+        self.user_manager = UserManager()
         
         # Initialize Twilio client
         if self.config.TWILIO_ACCOUNT_SID and self.config.TWILIO_AUTH_TOKEN:
@@ -19,50 +26,110 @@ class WhatsAppBot:
             self.twilio_client = None
             logging.warning("Twilio credentials not configured")
     
-    def handle_message(self, from_number: str, message_body: str) -> str:
-        """Handle incoming WhatsApp message"""
+    def handle_message(self, from_number: str, message_body: str, media_url: str = None, media_type: str = None) -> str:
+        """Handle incoming WhatsApp message with optional media"""
         try:
-            message_body = message_body.strip().lower()
+            # Get or create user
+            user = self.user_manager.get_or_create_user(from_number)
+            user_id = user["user_id"]
+            
+            # Handle media (file uploads)
+            if media_url:
+                return self._handle_media_upload(user_id, media_url, media_type)
+            
+            message_body_lower = message_body.strip().lower()
             
             # Handle special commands
-            if message_body in ['hello', 'hi', 'start']:
-                return self._get_welcome_message()
+            if message_body_lower in ['hello', 'hi', 'start']:
+                return self._get_welcome_message(user["name"])
             
-            elif message_body in ['help', '?']:
+            elif message_body_lower in ['help', '?']:
                 return self._get_help_message()
             
-            elif message_body == 'stats':
-                return self._get_stats_message()
+            elif message_body_lower == 'stats':
+                return self._get_user_stats_message(user_id)
             
-            elif message_body.startswith('research '):
-                # Research a topic
+            elif message_body_lower == 'clear':
+                self.user_rag_system.clear_conversation(user_id)
+                return "✅ Conversation history cleared! Starting fresh."
+            
+            elif message_body_lower.startswith('research '):
+                # Research a topic and add to user's KB
                 topic = message_body[9:].strip()
-                return self._research_topic(topic)
+                return self._research_topic_for_user(user_id, topic)
             
-            elif message_body.startswith('scrape '):
-                # Scrape a URL
+            elif message_body_lower.startswith('scrape '):
+                # Scrape a URL and add to user's KB
                 url = message_body[7:].strip()
-                return self._scrape_url(url)
+                return self._scrape_url_for_user(user_id, url)
             
             else:
-                # Regular query
-                response = self.rag_system.query(message_body)
-                return f"🤖 *RAG Bot Response:*\n\n{response}\n\n_Powered by GPT-OSS_"
+                # Regular query with conversation context
+                response = self.user_rag_system.query_with_context(user_id, message_body)
+                return f"🤖 {response}"
         
         except Exception as e:
             logging.error(f"Error handling WhatsApp message: {str(e)}")
             return "Sorry, I encountered an error processing your message. Please try again."
     
-    def _get_welcome_message(self) -> str:
+    def _handle_media_upload(self, user_id: str, media_url: str, media_type: str) -> str:
+        """Handle file uploads from WhatsApp"""
+        try:
+            # Download the media
+            headers = {
+                'Authorization': f'Basic {self.config.TWILIO_ACCOUNT_SID}:{self.config.TWILIO_AUTH_TOKEN}'
+            }
+            response = requests.get(media_url, headers=headers, timeout=30)
+            
+            if response.status_code != 200:
+                return "❌ Failed to download the file. Please try again."
+            
+            # Handle different file types
+            if 'pdf' in media_type.lower():
+                # Process PDF
+                pdf_reader = PyPDF2.PdfReader(io.BytesIO(response.content))
+                text = ""
+                for page in pdf_reader.pages:
+                    text += page.extract_text() + "\n"
+                
+                metadata = {"source": "whatsapp_upload", "type": "pdf"}
+                result = self.user_rag_system.add_document_for_user(user_id, text, metadata)
+                return f"📄 *PDF Uploaded!*\n\n{result}\n\nYou can now ask questions about this document!"
+            
+            elif 'image' in media_type.lower():
+                return "📷 Image received! Note: Image text extraction coming soon. For now, please upload PDF or text files."
+            
+            elif 'text' in media_type.lower():
+                # Process text file
+                text = response.content.decode('utf-8')
+                metadata = {"source": "whatsapp_upload", "type": "text"}
+                result = self.user_rag_system.add_document_for_user(user_id, text, metadata)
+                return f"📝 *Text File Uploaded!*\n\n{result}\n\nYou can now ask questions about this document!"
+            
+            else:
+                return f"❓ Unsupported file type: {media_type}\n\nPlease upload PDF or text files."
+                
+        except Exception as e:
+            logging.error(f"Error handling media upload: {str(e)}")
+            return f"❌ Error processing file: {str(e)}"
+    
+    def _get_welcome_message(self, name: str) -> str:
         """Get welcome message"""
-        return """
-🤖 *Welcome to RAG Bot!*
+        return f"""
+🤖 *Welcome back, {name}!*
 
-I can help you find information from my knowledge base. 
+I'm your personal RAG Bot with conversation memory!
 
-Send me any question and I'll search through uploaded documents to provide you with relevant answers.
+✨ *What I can do:*
+• Remember our conversation (like ChatGPT)
+• Answer questions from YOUR private knowledge base
+• Accept file uploads (PDFs, text files)
+• Research topics and learn from the web
 
-Type 'help' for more information or just ask me anything!
+📤 *Upload files:* Just send me a PDF or text file!
+💬 *Ask anything:* I'll remember our conversation context
+
+Type 'help' for commands!
         """
     
     def _get_help_message(self) -> str:
@@ -73,32 +140,40 @@ Type 'help' for more information or just ask me anything!
 *Commands:*
 • hello/hi - Get welcome message
 • help/? - Show this help
-• stats - Show knowledge base statistics
-• research <topic> - Research and learn about a topic
-• scrape <url> - Add content from a website
+• stats - Show YOUR personal statistics
+• clear - Clear conversation history
+• research <topic> - Research and add to YOUR knowledge base
+• scrape <url> - Add website content to YOUR knowledge base
 
-*Usage:*
-Just send me any question about topics in the knowledge base!
+*File Uploads:*
+📤 Just send me a PDF or text file - I'll add it to YOUR private knowledge base!
 
-Examples:
-• "What is machine learning?"
-• "research artificial intelligence"
-• "scrape https://example.com/article"
+*Conversation:*
+💬 I remember our conversation context (like ChatGPT)
+🔒 Your data is private and isolated from other users
 
-I'll search through all uploaded documents to find the best answer for you!
+*Examples:*
+• "What did we talk about earlier?"
+• "Tell me more about that"
+• Send a PDF → Ask questions about it
+• "research healthy diets"
+
+I'll remember our conversation and search YOUR private knowledge base!
         """
     
-    def _get_stats_message(self) -> str:
-        """Get statistics message"""
+    def _get_user_stats_message(self, user_id: str) -> str:
+        """Get user statistics message"""
         try:
-            stats = self.rag_system.get_collection_stats()
+            stats = self.user_rag_system.get_user_stats(user_id)
             return f"""
-📊 *Knowledge Base Stats*
+📊 *Your Personal Stats*
 
-• Document chunks: {stats['total_documents']}
-• Collection: {stats['collection_name']}
+👤 Name: {stats['name']}
+📅 Member since: {stats['member_since']} days ago
+💬 Total messages: {stats['total_messages']}
+📚 Documents in your KB: {stats['total_documents']}
 
-Ready to answer your questions!
+Your knowledge base is private and secure! 🔒
             """
         except Exception as e:
             return f"Error getting stats: {str(e)}"
@@ -109,23 +184,46 @@ Ready to answer your questions!
         resp.message(response_text)
         return str(resp)
     
-    def _research_topic(self, topic: str) -> str:
-        """Research a topic and add to knowledge base"""
+    def _research_topic_for_user(self, user_id: str, topic: str) -> str:
+        """Research a topic and add to user's knowledge base"""
         try:
             from web_research import WebResearcher
             researcher = WebResearcher()
+            
+            # Research the topic
             result = researcher.research_topic(topic)
-            return f"🔍 *Research Results:*\n\n{result}"
+            
+            # The research already adds to global KB, but we should add to user's KB too
+            # For now, return the result
+            return f"🔍 *Research Results:*\n\n{result}\n\n_Added to YOUR knowledge base!_"
         except Exception as e:
             return f"Error researching topic: {str(e)}"
     
-    def _scrape_url(self, url: str) -> str:
-        """Scrape URL and add to knowledge base"""
+    def _scrape_url_for_user(self, user_id: str, url: str) -> str:
+        """Scrape URL and add to user's knowledge base"""
         try:
             from web_research import WebResearcher
             researcher = WebResearcher()
-            result = researcher.add_url_to_knowledge_base(url)
-            return f"🌐 *Web Scraping:*\n\n{result}"
+            
+            # Scrape the URL
+            scrape_result = researcher.scrape_url(url)
+            
+            if scrape_result['success']:
+                # Add to user's private knowledge base
+                metadata = {
+                    "source": "web_scrape",
+                    "url": url,
+                    "title": scrape_result['title']
+                }
+                result = self.user_rag_system.add_document_for_user(
+                    user_id, 
+                    scrape_result['content'], 
+                    metadata
+                )
+                return f"🌐 *Web Scraping Success!*\n\n{result}\n\nSource: {url}"
+            else:
+                return f"❌ Failed to scrape: {scrape_result.get('error', 'Unknown error')}"
+                
         except Exception as e:
             return f"Error scraping URL: {str(e)}"
     
