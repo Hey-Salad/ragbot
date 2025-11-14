@@ -178,6 +178,77 @@ if whatsapp_bot:
             logger.error(f"Error handling WhatsApp webhook: {str(e)}")
             return PlainTextResponse(content="Error processing message", status_code=500)
 
+# Voice integration
+try:
+    from voice_agent import VoiceAgent
+    voice_agent = VoiceAgent()
+    logger.info("Voice agent initialized successfully")
+    
+    @app.post("/voice/webhook")
+    async def voice_webhook(request: Request):
+        """Handle incoming voice calls"""
+        try:
+            form_data = await request.form()
+            from_number = form_data.get("From", "")
+            call_sid = form_data.get("CallSid", "")
+            
+            logger.info(f"Voice call from {from_number}, CallSid: {call_sid}")
+            
+            # Handle incoming call
+            twiml_response = voice_agent.handle_incoming_call(from_number)
+            return PlainTextResponse(content=twiml_response, media_type="application/xml")
+        
+        except Exception as e:
+            logger.error(f"Error handling voice webhook: {str(e)}")
+            return PlainTextResponse(content="<Response><Say>Error processing call</Say></Response>", media_type="application/xml")
+    
+    @app.post("/voice/process")
+    async def voice_process(request: Request):
+        """Process speech input from voice call"""
+        try:
+            form_data = await request.form()
+            speech_result = form_data.get("SpeechResult", "")
+            call_sid = form_data.get("CallSid", "")
+            
+            logger.info(f"Speech from {call_sid}: {speech_result}")
+            
+            # Check if this is a continuation decision
+            if call_sid in getattr(voice_agent, 'continuation_mode', set()):
+                twiml_response = voice_agent.handle_continue(speech_result)
+            else:
+                # Process the speech
+                twiml_response = voice_agent.process_speech(speech_result, call_sid)
+            
+            return PlainTextResponse(content=twiml_response, media_type="application/xml")
+        
+        except Exception as e:
+            logger.error(f"Error processing speech: {str(e)}")
+            return PlainTextResponse(content="<Response><Say>Error processing speech</Say></Response>", media_type="application/xml")
+    
+    @app.post("/sms/webhook")
+    async def sms_webhook(request: Request):
+        """Handle SMS messages (separate from WhatsApp)"""
+        try:
+            form_data = await request.form()
+            from_number = form_data.get("From", "")
+            message_body = form_data.get("Body", "")
+            
+            logger.info(f"SMS from {from_number}: {message_body}")
+            
+            # Use same WhatsApp bot logic for SMS
+            response_text = whatsapp_bot.handle_message(from_number, message_body)
+            
+            # Return TwiML response
+            twiml_response = whatsapp_bot.create_twiml_response(response_text)
+            return PlainTextResponse(content=twiml_response, media_type="application/xml")
+        
+        except Exception as e:
+            logger.error(f"Error handling SMS webhook: {str(e)}")
+            return PlainTextResponse(content="Error processing message", status_code=500)
+    
+except Exception as e:
+    logger.error(f"Failed to initialize voice agent: {str(e)}")
+
 if __name__ == "__main__":
     # Validate configuration
     try:
