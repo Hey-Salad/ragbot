@@ -105,14 +105,14 @@ class WebResearcher:
         except Exception as e:
             logging.error(f"DuckDuckGo error: {str(e)}")
         
-        # Try Wikipedia as fallback
-        if not results:
-            try:
-                wiki_result = self._search_wikipedia(topic)
-                if wiki_result:
-                    results.append(wiki_result)
-            except Exception as e:
-                logging.error(f"Wikipedia error: {str(e)}")
+        # Always try Wikipedia as it's most reliable
+        try:
+            wiki_result = self._search_wikipedia(topic)
+            if wiki_result:
+                results.append(wiki_result)
+        except Exception as e:
+            logging.error(f"Wikipedia error: {str(e)}")
+            print(f"Wikipedia error: {str(e)}")
         
         # If still no results, try web search
         if not results:
@@ -122,6 +122,7 @@ class WebResearcher:
                     results.append(web_result)
             except Exception as e:
                 logging.error(f"Web search error: {str(e)}")
+                print(f"Web search error: {str(e)}")
         
         if results:
             return f"🔍 *Researched '{topic}':*\n\n" + "\n".join(results)
@@ -132,7 +133,7 @@ class WebResearcher:
         """Search Wikipedia and add content"""
         try:
             # Wikipedia API search
-            search_url = f"https://en.wikipedia.org/w/api.php"
+            search_url = "https://en.wikipedia.org/w/api.php"
             params = {
                 "action": "query",
                 "format": "json",
@@ -141,76 +142,84 @@ class WebResearcher:
                 "srlimit": 1
             }
             
-            response = requests.get(search_url, params=params, timeout=10)
+            response = requests.get(search_url, params=params, timeout=10, headers=self.headers)
+            response.raise_for_status()
             data = response.json()
             
-            if data.get('query', {}).get('search'):
-                page_title = data['query']['search'][0]['title']
-                
-                # Get page content
-                content_params = {
-                    "action": "query",
-                    "format": "json",
-                    "titles": page_title,
-                    "prop": "extracts",
-                    "explaintext": True,
-                    "exintro": True
-                }
-                
-                content_response = requests.get(search_url, params=content_params, timeout=10)
-                content_data = content_response.json()
-                
-                pages = content_data.get('query', {}).get('pages', {})
-                for page_id, page_data in pages.items():
-                    if 'extract' in page_data:
-                        metadata = {
-                            "source": "wikipedia",
-                            "topic": topic,
-                            "title": page_title,
-                            "url": f"https://en.wikipedia.org/wiki/{page_title.replace(' ', '_')}"
-                        }
-                        self.rag_system.add_document(page_data['extract'], metadata)
-                        return f"✅ Added Wikipedia article: '{page_title}'"
+            search_results = data.get('query', {}).get('search', [])
+            if not search_results:
+                return None
+            
+            page_title = search_results[0]['title']
+            
+            # Get page content with more text
+            content_params = {
+                "action": "query",
+                "format": "json",
+                "titles": page_title,
+                "prop": "extracts",
+                "explaintext": True,
+                "exsectionformat": "plain"
+            }
+            
+            content_response = requests.get(search_url, params=content_params, timeout=10, headers=self.headers)
+            content_response.raise_for_status()
+            content_data = content_response.json()
+            
+            pages = content_data.get('query', {}).get('pages', {})
+            for page_id, page_data in pages.items():
+                if page_id != '-1' and 'extract' in page_data and page_data['extract']:
+                    extract = page_data['extract'][:5000]  # Limit to 5k chars
+                    metadata = {
+                        "source": "wikipedia",
+                        "topic": topic,
+                        "title": page_title,
+                        "url": f"https://en.wikipedia.org/wiki/{page_title.replace(' ', '_')}"
+                    }
+                    self.rag_system.add_document(extract, metadata)
+                    return f"✅ Added Wikipedia: '{page_title}'"
             
             return None
             
         except Exception as e:
             logging.error(f"Wikipedia search error: {str(e)}")
+            print(f"Wikipedia error: {str(e)}")  # Debug print
             return None
     
     def _search_web(self, topic: str) -> str:
         """Search web and scrape first result"""
         try:
-            # Use DuckDuckGo HTML search
-            search_url = f"https://html.duckduckgo.com/html/?q={topic}"
-            response = requests.get(search_url, headers=self.headers, timeout=10)
+            # Try scraping a relevant health website directly
+            # For health topics, use reliable sources
+            health_keywords = ['diet', 'health', 'nutrition', 'food', 'exercise', 'fitness']
             
-            soup = BeautifulSoup(response.content, 'html.parser')
-            
-            # Find first result link
-            result = soup.find('a', class_='result__a')
-            if result and result.get('href'):
-                url = result['href']
-                # Clean up DuckDuckGo redirect URL
-                if 'uddg=' in url:
-                    url = url.split('uddg=')[1].split('&')[0]
+            if any(keyword in topic.lower() for keyword in health_keywords):
+                # Try Mayo Clinic or similar reliable health sources
+                search_term = topic.replace(' ', '+')
+                potential_urls = [
+                    f"https://www.mayoclinic.org/search/search-results?q={search_term}",
+                    f"https://www.healthline.com/search?q1={search_term}",
+                ]
                 
-                # Scrape the URL
-                scrape_result = self.scrape_url(url)
-                if scrape_result['success']:
+                # For now, let's use a simpler approach - scrape Wikipedia directly
+                wiki_url = f"https://en.wikipedia.org/wiki/{topic.replace(' ', '_')}"
+                scrape_result = self.scrape_url(wiki_url)
+                
+                if scrape_result['success'] and len(scrape_result['content']) > 100:
                     metadata = {
-                        "source": "web_search",
+                        "source": "web_scrape",
                         "topic": topic,
-                        "url": url,
+                        "url": wiki_url,
                         "title": scrape_result['title']
                     }
                     self.rag_system.add_document(scrape_result['content'], metadata)
-                    return f"✅ Added web article: '{scrape_result['title']}'\nSource: {url}"
+                    return f"✅ Added article: '{scrape_result['title']}'"
             
             return None
             
         except Exception as e:
             logging.error(f"Web search error: {str(e)}")
+            print(f"Web search error: {str(e)}")  # Debug print
             return None
     
     def scrape_multiple_urls(self, urls: List[str]) -> List[Dict[str, Any]]:
