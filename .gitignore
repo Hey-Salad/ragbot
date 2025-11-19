@@ -35,6 +35,7 @@ venv.bak/
 chroma_db/
 uploads/
 logs/
+user_data/
 *.log
 
 # IDE

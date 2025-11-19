@@ -5,11 +5,11 @@ Wants=network.target
 
 [Service]
 Type=simple
-User=pi
-Group=pi
-WorkingDirectory=/home/pi/ragbot
-Environment=PATH=/home/pi/ragbot/venv/bin
-ExecStart=/home/pi/ragbot/venv/bin/python main.py
+User=admin
+Group=admin
+WorkingDirectory=/home/admin/ragbot
+Environment=PATH=/home/admin/ragbot/venv/bin
+ExecStart=/home/admin/ragbot/venv/bin/python main.py
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=always
 RestartSec=10
@@ -21,7 +21,7 @@ SyslogIdentifier=ragbot
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
-ReadWritePaths=/home/pi/ragbot/chroma_db /home/pi/ragbot/uploads /home/pi/ragbot/logs
+ReadWritePaths=/home/admin/ragbot/chroma_db /home/admin/ragbot/uploads /home/admin/ragbot/logs /home/admin/ragbot/user_data /home/admin/ragbot/user_data/chroma_db
 ProtectHome=read-only
 
 [Install]
