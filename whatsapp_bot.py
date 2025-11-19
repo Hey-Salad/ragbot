@@ -75,9 +75,15 @@ class WhatsAppBot:
     def _handle_media_upload(self, user_id: str, media_url: str, media_type: str) -> str:
         """Handle file uploads from WhatsApp"""
         try:
-            # Download the media
+            # Download the media with Twilio authentication
+            import base64
+            auth_string = f"{self.config.TWILIO_ACCOUNT_SID}:{self.config.TWILIO_AUTH_TOKEN}"
+            auth_bytes = auth_string.encode('ascii')
+            base64_bytes = base64.b64encode(auth_bytes)
+            base64_auth = base64_bytes.decode('ascii')
+            
             headers = {
-                'Authorization': f'Basic {self.config.TWILIO_ACCOUNT_SID}:{self.config.TWILIO_AUTH_TOKEN}'
+                'Authorization': f'Basic {base64_auth}'
             }
             response = requests.get(media_url, headers=headers, timeout=30)
             
@@ -87,14 +93,18 @@ class WhatsAppBot:
             # Handle different file types
             if 'pdf' in media_type.lower():
                 # Process PDF
+                logging.info(f"Processing PDF for user {user_id}, size: {len(response.content)} bytes")
                 pdf_reader = PyPDF2.PdfReader(io.BytesIO(response.content))
                 text = ""
-                for page in pdf_reader.pages:
-                    text += page.extract_text() + "\n"
+                for page_num, page in enumerate(pdf_reader.pages):
+                    page_text = page.extract_text()
+                    text += page_text + "\n"
+                    logging.info(f"Extracted {len(page_text)} chars from page {page_num + 1}")
                 
-                metadata = {"source": "whatsapp_upload", "type": "pdf"}
+                logging.info(f"Total text extracted: {len(text)} characters")
+                metadata = {"source": "whatsapp_upload", "type": "pdf", "filename": f"whatsapp_pdf_{user_id}"}
                 result = self.user_rag_system.add_document_for_user(user_id, text, metadata)
-                return f"📄 *PDF Uploaded!*\n\n{result}\n\nYou can now ask questions about this document!"
+                return f"📄 *PDF Uploaded Successfully!*\n\n{result}\n\n💡 You can now ask me questions about this document!"
             
             elif 'image' in media_type.lower():
                 return "📷 Image received! Note: Image text extraction coming soon. For now, please upload PDF or text files."
