@@ -19,7 +19,8 @@ class UserRAGSystem:
         # Initialize GPT-OSS client
         self.gpt_client = OpenAI(
             base_url="https://router.huggingface.co/v1",
-            api_key=self.config.HUGGINGFACE_API_TOKEN
+            api_key=self.config.HUGGINGFACE_API_TOKEN,
+            timeout=30.0  # Add timeout to prevent broken pipe errors
         )
     
     def add_document_for_user(self, user_id: str, text: str, metadata: Dict[str, Any] = None) -> str:
