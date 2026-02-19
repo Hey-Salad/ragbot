@@ -75,52 +75,111 @@ class WhatsAppBot:
     def _handle_media_upload(self, user_id: str, media_url: str, media_type: str) -> str:
         """Handle file uploads from WhatsApp"""
         try:
-            # Download the media with Twilio authentication
-            import base64
-            auth_string = f"{self.config.TWILIO_ACCOUNT_SID}:{self.config.TWILIO_AUTH_TOKEN}"
-            auth_bytes = auth_string.encode('ascii')
-            base64_bytes = base64.b64encode(auth_bytes)
-            base64_auth = base64_bytes.decode('ascii')
-            
-            headers = {
-                'Authorization': f'Basic {base64_auth}'
-            }
-            response = requests.get(media_url, headers=headers, timeout=30)
-            
+            # Add logging for debugging
+            logging.info(f"Processing media upload for user {user_id}")
+            logging.info(f"Media URL: {media_url}")
+            logging.info(f"Media Type: {media_type}")
+
+            # Download the media with proper authentication
+            response = requests.get(
+                media_url,
+                auth=(self.config.TWILIO_ACCOUNT_SID, self.config.TWILIO_AUTH_TOKEN),
+                timeout=30
+            )
+
             if response.status_code != 200:
+                logging.error(f"Failed to download media: HTTP {response.status_code}")
                 return "❌ Failed to download the file. Please try again."
-            
-            # Handle different file types
-            if 'pdf' in media_type.lower():
-                # Process PDF
-                logging.info(f"Processing PDF for user {user_id}, size: {len(response.content)} bytes")
-                pdf_reader = PyPDF2.PdfReader(io.BytesIO(response.content))
-                text = ""
-                for page_num, page in enumerate(pdf_reader.pages):
-                    page_text = page.extract_text()
-                    text += page_text + "\n"
-                    logging.info(f"Extracted {len(page_text)} chars from page {page_num + 1}")
-                
-                logging.info(f"Total text extracted: {len(text)} characters")
-                metadata = {"source": "whatsapp_upload", "type": "pdf", "filename": f"whatsapp_pdf_{user_id}"}
-                result = self.user_rag_system.add_document_for_user(user_id, text, metadata)
-                return f"📄 *PDF Uploaded Successfully!*\n\n{result}\n\n💡 You can now ask me questions about this document!"
-            
-            elif 'image' in media_type.lower():
+
+            content = response.content
+            logging.info(f"Downloaded {len(content)} bytes")
+
+            # Detect file type using multiple methods
+            is_pdf = False
+            is_image = False
+            is_text = False
+
+            # Method 1: Check MIME type (with null-safety)
+            if media_type:
+                media_type_lower = media_type.lower()
+                logging.info(f"Checking MIME type: {media_type_lower}")
+
+                # PDF detection - handle various MIME types
+                if ('pdf' in media_type_lower or
+                    media_type_lower in ['application/octet-stream', 'application/x-pdf', 'application/vnd.pdf']):
+                    is_pdf = True
+                    logging.info("Detected as PDF by MIME type")
+
+                elif 'image' in media_type_lower:
+                    is_image = True
+                    logging.info("Detected as image by MIME type")
+
+                elif 'text' in media_type_lower:
+                    is_text = True
+                    logging.info("Detected as text by MIME type")
+
+            # Method 2: Check file extension from URL (fallback)
+            if not is_pdf and not is_image and not is_text and media_url:
+                url_lower = media_url.lower()
+                if url_lower.endswith('.pdf') or '.pdf?' in url_lower:
+                    is_pdf = True
+                    logging.info("Detected as PDF by file extension")
+                elif any(ext in url_lower for ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp']):
+                    is_image = True
+                    logging.info("Detected as image by file extension")
+                elif any(ext in url_lower for ext in ['.txt', '.csv', '.md']):
+                    is_text = True
+                    logging.info("Detected as text by file extension")
+
+            # Method 3: Check magic bytes (file signature)
+            if not is_pdf and len(content) >= 4:
+                # PDF magic bytes: %PDF
+                if content[:4] == b'%PDF':
+                    is_pdf = True
+                    logging.info("Detected as PDF by magic bytes")
+
+            # Process based on detected type
+            if is_pdf:
+                logging.info("Processing as PDF document")
+                try:
+                    pdf_reader = PyPDF2.PdfReader(io.BytesIO(content))
+                    text = ""
+                    for page_num, page in enumerate(pdf_reader.pages):
+                        page_text = page.extract_text()
+                        text += page_text + "\n"
+                        logging.info(f"Extracted {len(page_text)} chars from page {page_num + 1}")
+
+                    if not text.strip():
+                        logging.warning("PDF text extraction resulted in empty content")
+                        return "⚠️ PDF uploaded but no text could be extracted. The PDF might be image-based or encrypted."
+
+                    metadata = {"source": "whatsapp_upload", "type": "pdf"}
+                    result = self.user_rag_system.add_document_for_user(user_id, text, metadata)
+                    logging.info(f"Successfully processed PDF: {result}")
+                    return f"📄 *PDF Uploaded!*\n\n{result}\n\nYou can now ask questions about this document!"
+
+                except Exception as pdf_error:
+                    logging.error(f"Error processing PDF: {str(pdf_error)}")
+                    return f"❌ Error reading PDF: {str(pdf_error)}\n\nThe file might be corrupted or password-protected."
+
+            elif is_image:
+                logging.info("Image detected but not yet supported")
                 return "📷 Image received! Note: Image text extraction coming soon. For now, please upload PDF or text files."
-            
-            elif 'text' in media_type.lower():
-                # Process text file
-                text = response.content.decode('utf-8')
+
+            elif is_text:
+                logging.info("Processing as text file")
+                text = content.decode('utf-8')
                 metadata = {"source": "whatsapp_upload", "type": "text"}
                 result = self.user_rag_system.add_document_for_user(user_id, text, metadata)
+                logging.info(f"Successfully processed text file: {result}")
                 return f"📝 *Text File Uploaded!*\n\n{result}\n\nYou can now ask questions about this document!"
-            
+
             else:
-                return f"❓ Unsupported file type: {media_type}\n\nPlease upload PDF or text files."
-                
+                logging.warning(f"Unsupported or undetected file type. MIME: {media_type}, URL: {media_url}")
+                return f"❓ Unsupported file type: {media_type or 'unknown'}\n\nPlease upload PDF or text files.\n\nIf you sent a PDF, please try again or contact support."
+
         except Exception as e:
-            logging.error(f"Error handling media upload: {str(e)}")
+            logging.error(f"Error handling media upload: {str(e)}", exc_info=True)
             return f"❌ Error processing file: {str(e)}"
     
     def _get_welcome_message(self, name: str) -> str:

@@ -61,3 +61,4 @@ temp_repo/
 # Model cache
 .cache/
 models/
+.env.telegram
