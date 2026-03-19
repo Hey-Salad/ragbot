@@ -1,112 +1,115 @@
-import os
-import requests
-import chromadb
-from chromadb.config import Settings
-from sentence_transformers import SentenceTransformer
-from typing import List, Dict, Any
-import PyPDF2
 import io
-from config import Config
+import logging
+from typing import Any, Dict, List, Optional
+
+import chromadb
+import PyPDF2
+from chromadb.config import Settings
 from openai import OpenAI
+
+from config import Config
+from embeddings import EmbeddingProvider
+from security_utils import sanitize_filename
+
+logger = logging.getLogger(__name__)
+
 
 class RAGSystem:
     def __init__(self):
         self.config = Config()
-        
-        # Initialize ChromaDB
+
         self.chroma_client = chromadb.PersistentClient(
             path=self.config.CHROMA_PERSIST_DIRECTORY,
-            settings=Settings(anonymized_telemetry=False)
+            settings=Settings(anonymized_telemetry=False),
         )
-        
-        # Get or create collection
         self.collection = self.chroma_client.get_or_create_collection(
             name="documents",
-            metadata={"hnsw:space": "cosine"}
+            metadata={"hnsw:space": "cosine"},
         )
-        
-        # Initialize sentence transformer for embeddings
-        self.embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
-        
-        # Initialize GPT-OSS client (same as your HeySalad implementation)
-        self.gpt_client = OpenAI(
-            base_url="https://router.huggingface.co/v1",
-            api_key=self.config.HUGGINGFACE_API_TOKEN,
-            timeout=30.0  # Add timeout to prevent broken pipe errors
+        self.embedding_model = EmbeddingProvider(
+            backend=self.config.EMBEDDING_BACKEND,
         )
-        
-    def add_document(self, text: str, metadata: Dict[str, Any] = None) -> str:
-        """Add a document to the vector database"""
-        if metadata is None:
-            metadata = {}
-            
-        # Split text into chunks
-        chunks = self._split_text(text)
-        
-        # Generate embeddings
+        self.gpt_client = (
+            OpenAI(
+                base_url="https://router.huggingface.co/v1",
+                api_key=self.config.HUGGINGFACE_API_TOKEN,
+                timeout=self.config.REQUEST_TIMEOUT_SECONDS,
+            )
+            if self.config.HUGGINGFACE_API_TOKEN
+            else None
+        )
+
+    def add_document(self, text: str, metadata: Optional[Dict[str, Any]] = None) -> str:
+        """Add a document to the vector database."""
+        clean_text = (text or "").strip()
+        if not clean_text:
+            raise ValueError("Document content is empty")
+
+        metadata = dict(metadata or {})
+        chunks = self._split_text(clean_text)
+        if not chunks:
+            raise ValueError("Document content is empty after preprocessing")
+
         embeddings = self.embedding_model.encode(chunks)
-        
-        # Create unique IDs for chunks
-        doc_id = metadata.get('filename', 'doc')
+        doc_id = sanitize_filename(metadata.get("filename"), default="doc")
         chunk_ids = [f"{doc_id}_chunk_{i}" for i in range(len(chunks))]
-        
-        # Add to ChromaDB
+
         self.collection.add(
-            embeddings=embeddings.tolist(),
+            embeddings=embeddings,
             documents=chunks,
             metadatas=[metadata] * len(chunks),
-            ids=chunk_ids
+            ids=chunk_ids,
         )
-        
+
         return f"Added {len(chunks)} chunks from document"
-    
+
     def add_pdf_document(self, pdf_content: bytes, filename: str) -> str:
-        """Extract text from PDF and add to vector database"""
+        """Extract text from PDF and add to vector database."""
         try:
             pdf_reader = PyPDF2.PdfReader(io.BytesIO(pdf_content))
-            text = ""
-            
+            text_parts: List[str] = []
+
             for page in pdf_reader.pages:
-                text += page.extract_text() + "\n"
-            
-            metadata = {"filename": filename, "type": "pdf"}
-            return self.add_document(text, metadata)
-            
-        except Exception as e:
-            return f"Error processing PDF: {str(e)}"
-    
-    def search_documents(self, query: str, top_k: int = None) -> List[Dict[str, Any]]:
-        """Search for relevant documents"""
-        if top_k is None:
-            top_k = self.config.TOP_K_RESULTS
-            
-        # Generate query embedding
+                text_parts.append(page.extract_text() or "")
+
+            metadata = {"filename": sanitize_filename(filename), "type": "pdf"}
+            return self.add_document("\n".join(text_parts), metadata)
+        except Exception as exc:
+            logger.exception("Error processing PDF document")
+            raise ValueError("Unable to process PDF document") from exc
+
+    def search_documents(self, query: str, top_k: Optional[int] = None) -> List[Dict[str, Any]]:
+        """Search for relevant documents."""
+        query = (query or "").strip()
+        if not query or self.collection.count() == 0:
+            return []
+
+        top_k = top_k or self.config.TOP_K_RESULTS
         query_embedding = self.embedding_model.encode([query])
-        
-        # Search in ChromaDB
         results = self.collection.query(
-            query_embeddings=query_embedding.tolist(),
-            n_results=top_k
+            query_embeddings=query_embedding,
+            n_results=min(top_k, self.collection.count()),
         )
-        
-        # Format results
+
         formatted_results = []
-        if results['documents'] and results['documents'][0]:
-            for i, doc in enumerate(results['documents'][0]):
-                formatted_results.append({
-                    'content': doc,
-                    'metadata': results['metadatas'][0][i] if results['metadatas'][0] else {},
-                    'distance': results['distances'][0][i] if results['distances'][0] else 0
-                })
-        
+        if results["documents"] and results["documents"][0]:
+            for index, doc in enumerate(results["documents"][0]):
+                formatted_results.append(
+                    {
+                        "content": doc,
+                        "metadata": results["metadatas"][0][index] if results["metadatas"][0] else {},
+                        "distance": results["distances"][0][index] if results["distances"][0] else 0,
+                    }
+                )
+
         return formatted_results
-    
+
     def generate_response(self, query: str, context_docs: List[Dict[str, Any]]) -> str:
-        """Generate response using GPT-OSS with RAG context (same approach as HeySalad)"""
-        # Prepare context from retrieved documents
-        context = "\n\n".join([doc['content'] for doc in context_docs])
-        
-        # Create system prompt for RAG
+        """Generate a response using retrieved context."""
+        if not context_docs:
+            return self._generate_fallback_response(query, context_docs)
+
+        context = "\n\n".join(doc["content"] for doc in context_docs)
         system_prompt = f"""You are an intelligent AI assistant that answers questions based on provided context.
 
 Context from knowledge base:
@@ -118,78 +121,67 @@ Guidelines:
 - Keep responses concise and helpful
 - Cite relevant information from the context"""
 
+        if not self.gpt_client:
+            return self._generate_fallback_response(query, context_docs)
+
         try:
-            # Use GPT-OSS via Hugging Face router (same as your HeySalad implementation)
             response = self.gpt_client.chat.completions.create(
-                model="openai/gpt-oss-20b:fireworks-ai",
+                model=self.config.HUGGINGFACE_MODEL,
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": query}
+                    {"role": "user", "content": query},
                 ],
                 max_tokens=300,
-                temperature=0.7
+                temperature=0.7,
             )
-            
-            # Handle the response properly
             if response.choices and response.choices[0].message:
                 content = response.choices[0].message.content
                 if content and content.strip():
                     return content.strip()
-            
-            # Fallback if response is None or empty
-            raise Exception("Empty response from GPT-OSS")
-            
-        except Exception as e:
-            print(f"GPT-OSS error: {str(e)}")
-            # Fallback to simple context-based response
-            return self._generate_fallback_response(query, context_docs)
-    
+        except Exception as exc:
+            logger.warning("LLM response failed; using fallback response: %s", exc)
+
+        return self._generate_fallback_response(query, context_docs)
+
     def _generate_fallback_response(self, query: str, context_docs: List[Dict[str, Any]]) -> str:
-        """Generate a simple response based on context when FlexaAI API is not available"""
+        """Generate a simple response based on retrieved context."""
         if not context_docs:
             return "I couldn't find any relevant information in the knowledge base to answer your question."
-        
-        # Simple keyword matching and context extraction
-        context = "\n\n".join([doc['content'] for doc in context_docs])
-        
-        # Return the most relevant context with a note
-        response = f"""Based on the documents in my knowledge base, here's what I found:
 
-{context[:800]}{'...' if len(context) > 800 else ''}
+        context = "\n\n".join(doc["content"] for doc in context_docs)
+        return (
+            "Based on the documents in the knowledge base, here's what I found:\n\n"
+            f"{context[:800]}{'...' if len(context) > 800 else ''}\n\n"
+            f"Query: {query}\n"
+            f"Sources: {len(context_docs)} document(s) found"
+        )
 
-📝 *Note: This is a direct excerpt from the knowledge base. For AI-generated responses, please configure the FlexaAI API endpoint correctly.*
-
-**Query:** {query}
-**Sources:** {len(context_docs)} document(s) found"""
-        
-        return response
-    
     def query(self, question: str) -> str:
-        """Main query method that combines search and generation"""
-        # Search for relevant documents
+        """Search for relevant context and generate a response."""
         relevant_docs = self.search_documents(question)
-        
         if not relevant_docs:
             return "I couldn't find any relevant information in the knowledge base to answer your question."
-        
-        # Generate response with context
         return self.generate_response(question, relevant_docs)
-    
+
     def _split_text(self, text: str) -> List[str]:
-        """Split text into chunks for better retrieval"""
+        """Split text into chunks for retrieval."""
         words = text.split()
+        if not words:
+            return []
+
         chunks = []
-        
-        for i in range(0, len(words), self.config.CHUNK_SIZE - self.config.CHUNK_OVERLAP):
-            chunk = " ".join(words[i:i + self.config.CHUNK_SIZE])
-            chunks.append(chunk)
-        
+        step = max(self.config.CHUNK_SIZE - self.config.CHUNK_OVERLAP, 1)
+        for index in range(0, len(words), step):
+            chunk = " ".join(words[index : index + self.config.CHUNK_SIZE]).strip()
+            if chunk:
+                chunks.append(chunk)
         return chunks
-    
+
     def get_collection_stats(self) -> Dict[str, Any]:
-        """Get statistics about the document collection"""
-        count = self.collection.count()
+        """Get statistics about the document collection."""
         return {
-            "total_documents": count,
-            "collection_name": self.collection.name
+            "total_documents": self.collection.count(),
+            "collection_name": self.collection.name,
+            "embedding_backend": self.embedding_model.backend_name,
+            "llm_enabled": bool(self.gpt_client),
         }

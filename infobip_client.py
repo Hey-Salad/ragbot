@@ -9,7 +9,7 @@ from typing import Optional, Dict, Any
 logger = logging.getLogger(__name__)
 
 class InfobipClient:
-    def __init__(self, api_key: str, base_url: str = "https://api.infobip.com"):
+    def __init__(self, api_key: str, base_url: str = "https://api.infobip.com", timeout: float = 15.0):
         """
         Initialize Infobip client
 
@@ -19,11 +19,19 @@ class InfobipClient:
         """
         self.api_key = api_key
         self.base_url = base_url
+        self.timeout = timeout
         self.headers = {
             "Authorization": f"App {api_key}",
             "Content-Type": "application/json",
             "Accept": "application/json"
         }
+
+    def _request(self, method: str, url: str, **kwargs):
+        kwargs.setdefault("headers", self.headers)
+        kwargs.setdefault("timeout", self.timeout)
+        response = requests.request(method, url, **kwargs)
+        response.raise_for_status()
+        return response
 
     def send_whatsapp_message(
         self,
@@ -53,7 +61,7 @@ class InfobipClient:
         }
 
         try:
-            response = requests.post(url, json=payload, headers=self.headers)
+            response = self._request("post", url, json=payload)
             response.raise_for_status()
             logger.info(f"WhatsApp message sent to {to}")
             return response.json()
@@ -92,7 +100,7 @@ class InfobipClient:
         }
 
         try:
-            response = requests.post(url, json=payload, headers=self.headers)
+            response = self._request("post", url, json=payload)
             response.raise_for_status()
             return response.json()
         except requests.exceptions.RequestException as e:
@@ -128,7 +136,7 @@ class InfobipClient:
         }
 
         try:
-            response = requests.post(url, json=payload, headers=self.headers)
+            response = self._request("post", url, json=payload)
             response.raise_for_status()
             logger.info(f"SMS sent to {to}")
             return response.json()
@@ -150,7 +158,7 @@ class InfobipClient:
         params = {"limit": limit}
 
         try:
-            response = requests.get(url, headers=self.headers, params=params)
+            response = self._request("get", url, params=params)
             response.raise_for_status()
             return response.json()
         except requests.exceptions.RequestException as e:
@@ -187,7 +195,7 @@ class InfobipClient:
             payload["content"]["caption"] = caption
 
         try:
-            response = requests.post(url, json=payload, headers=self.headers)
+            response = self._request("post", url, json=payload)
             response.raise_for_status()
             return response.json()
         except requests.exceptions.RequestException as e:
@@ -227,7 +235,7 @@ class InfobipClient:
             payload["content"]["caption"] = caption
 
         try:
-            response = requests.post(url, json=payload, headers=self.headers)
+            response = self._request("post", url, json=payload)
             response.raise_for_status()
             return response.json()
         except requests.exceptions.RequestException as e:
@@ -275,7 +283,7 @@ class InfobipClient:
             payload["content"]["footer"] = {"text": footer_text}
 
         try:
-            response = requests.post(url, json=payload, headers=self.headers)
+            response = self._request("post", url, json=payload)
             response.raise_for_status()
             return response.json()
         except requests.exceptions.RequestException as e:

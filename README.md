@@ -1,6 +1,6 @@
 # RAG Bot with GPT-OSS Integration
 
-A Retrieval-Augmented Generation (RAG) bot that integrates with GPT-OSS via Hugging Face and provides access via Slack and WhatsApp. Optimized for Raspberry Pi deployment.
+A Retrieval-Augmented Generation (RAG) bot that integrates with GPT-OSS via Hugging Face and provides access via Slack and WhatsApp. The runtime now starts cleanly on low-resource machines by using a lightweight hashing embedder unless `sentence-transformers` is installed.
 
 ## Features
 
@@ -9,7 +9,8 @@ A Retrieval-Augmented Generation (RAG) bot that integrates with GPT-OSS via Hugg
 - 📱 **WhatsApp Integration**: Query via WhatsApp using Twilio
 - 🔍 **Vector Search**: Powered by ChromaDB for efficient document retrieval
 - 🧠 **AI Responses**: Uses GPT-OSS via Hugging Face for intelligent answers
-- 🍓 **Raspberry Pi Ready**: Optimized for low-resource environments
+- 🍓 **Low-Resource Startup**: Runs without pulling GPU-only `torch` dependencies by default
+- 🔐 **Safer Defaults**: Optional API key protection, Twilio signature validation, and SSRF protections for scrape/media URLs
 
 ## Quick Start
 
@@ -26,17 +27,21 @@ cp .env.example .env
 nano .env
 ```
 
-Required configuration:
-- `HUGGINGFACE_API_TOKEN`: Your Hugging Face API token
+Recommended configuration:
+- `API_KEY`: Protects REST endpoints such as `/upload`, `/query`, `/stats`, and `/research/*`
+- `HUGGINGFACE_API_TOKEN`: Enables LLM-generated answers. Without it, the bot falls back to context excerpts.
 
 Optional (for integrations):
 - Slack: `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET`
 - WhatsApp: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER`
+- Public webhook deployments: `PUBLIC_BASE_URL`
 
 ### 3. Start
 ```bash
 ./start.sh
 ```
+
+By default the app binds to `127.0.0.1`. Set `HOST=0.0.0.0` only when you intend to expose it behind a firewall or reverse proxy.
 
 ## API Endpoints
 
@@ -53,6 +58,7 @@ Optional (for integrations):
 ### Upload a Document
 ```bash
 curl -X POST "http://localhost:8000/upload" \
+  -H "X-API-Key: your_api_key" \
   -H "accept: application/json" \
   -H "Content-Type: multipart/form-data" \
   -F "file=@document.pdf"
@@ -61,6 +67,7 @@ curl -X POST "http://localhost:8000/upload" \
 ### Query the System
 ```bash
 curl -X POST "http://localhost:8000/query" \
+  -H "X-API-Key: your_api_key" \
   -H "Content-Type: application/json" \
   -d '{"question": "What is machine learning?"}'
 ```
@@ -78,12 +85,13 @@ curl -X POST "http://localhost:8000/query" \
 1. Create Twilio account at https://www.twilio.com
 2. Set up WhatsApp sandbox or get approved number
 3. Configure webhook URL: `https://your-domain.com/whatsapp/webhook`
+4. Keep `VALIDATE_TWILIO_SIGNATURES=true` in production
 
 ## Raspberry Pi Deployment
 
 ### System Requirements
 - Raspberry Pi 4 (4GB+ RAM recommended)
-- Python 3.8+
+- Python 3.10+
 - 16GB+ SD card
 
 ### Performance Tips
@@ -106,7 +114,7 @@ After=network.target
 Type=simple
 User=pi
 WorkingDirectory=/home/pi/ragbot
-ExecStart=/home/pi/ragbot/venv/bin/python main.py
+ExecStart=/home/pi/ragbot/.venv/bin/python main.py
 Restart=always
 RestartSec=10
 
@@ -140,11 +148,11 @@ sudo systemctl start ragbot.service
 
 ### Common Issues
 
-1. **Memory Issues on Pi**: Reduce `CHUNK_SIZE` in config.py
+1. **Large dependency installs**: The default install no longer requires `sentence-transformers`. If you want higher-quality embeddings, install it manually after the core app is working.
 2. **Slow Responses**: Check network connection to Hugging Face
-3. **ChromaDB Errors**: Ensure write permissions to `chroma_db` directory
-4. **Import Errors**: Activate virtual environment before running
-5. **GPT-OSS API Errors**: Verify your Hugging Face token has access to the model
+3. **ChromaDB Errors**: Ensure write permissions to `chroma_db` and `user_data` directories
+4. **Import Errors**: Activate the virtual environment before running
+5. **Webhook validation failures**: Set `PUBLIC_BASE_URL` so Twilio signature checks see the public URL Twilio calls
 
 ### Logs
 Check application logs:

@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 class QuoClient:
     """QUO.com API Client for messaging and communication"""
 
-    def __init__(self, api_key: str, base_url: str = "https://api.quo.com/v1"):
+    def __init__(self, api_key: str, base_url: str = "https://api.quo.com/v1", timeout: float = 15.0):
         """
         Initialize QUO client
 
@@ -23,12 +23,20 @@ class QuoClient:
         """
         self.api_key = api_key
         self.base_url = base_url
+        self.timeout = timeout
         self.headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
             "Accept": "application/json"
         }
         logger.info("QUO client initialized")
+
+    def _request(self, method: str, url: str, **kwargs):
+        kwargs.setdefault("headers", self.headers)
+        kwargs.setdefault("timeout", self.timeout)
+        response = requests.request(method, url, **kwargs)
+        response.raise_for_status()
+        return response
 
     # ==========================================
     # MESSAGING
@@ -63,7 +71,7 @@ class QuoClient:
         }
 
         try:
-            response = requests.post(url, json=payload, headers=self.headers)
+            response = self._request("post", url, json=payload)
             response.raise_for_status()
             logger.info(f"Message sent to {to} via {channel}")
             return response.json()
@@ -173,7 +181,7 @@ class QuoClient:
             payload["callback_url"] = callback_url
 
         try:
-            response = requests.post(url, json=payload, headers=self.headers)
+            response = self._request("post", url, json=payload)
             response.raise_for_status()
             logger.info(f"Call initiated to {to}")
             return response.json()
@@ -186,7 +194,7 @@ class QuoClient:
         url = f"{self.base_url}/calls/{call_id}"
 
         try:
-            response = requests.get(url, headers=self.headers)
+            response = self._request("get", url)
             response.raise_for_status()
             return response.json()
         except requests.exceptions.RequestException as e:
@@ -217,7 +225,7 @@ class QuoClient:
         }
 
         try:
-            response = requests.post(url, json=payload, headers=self.headers)
+            response = self._request("post", url, json=payload)
             response.raise_for_status()
             return response.json()
         except requests.exceptions.RequestException as e:
@@ -229,7 +237,7 @@ class QuoClient:
         url = f"{self.base_url}/conversations/{conversation_id}"
 
         try:
-            response = requests.get(url, headers=self.headers)
+            response = self._request("get", url)
             response.raise_for_status()
             return response.json()
         except requests.exceptions.RequestException as e:
@@ -247,7 +255,7 @@ class QuoClient:
         payload = {"message": message}
 
         try:
-            response = requests.post(url, json=payload, headers=self.headers)
+            response = self._request("post", url, json=payload)
             response.raise_for_status()
             return response.json()
         except requests.exceptions.RequestException as e:
@@ -284,7 +292,7 @@ class QuoClient:
             payload["name"] = name
 
         try:
-            response = requests.post(webhook_url, json=payload, headers=self.headers)
+            response = self._request("post", webhook_url, json=payload)
             response.raise_for_status()
             logger.info(f"Webhook created: {url}")
             return response.json()
@@ -297,7 +305,7 @@ class QuoClient:
         url = f"{self.base_url}/webhooks"
 
         try:
-            response = requests.get(url, headers=self.headers)
+            response = self._request("get", url)
             response.raise_for_status()
             return response.json().get("webhooks", [])
         except requests.exceptions.RequestException as e:
@@ -309,7 +317,7 @@ class QuoClient:
         url = f"{self.base_url}/webhooks/{webhook_id}"
 
         try:
-            response = requests.delete(url, headers=self.headers)
+            response = self._request("delete", url)
             response.raise_for_status()
             logger.info(f"Webhook deleted: {webhook_id}")
             return True
@@ -347,7 +355,7 @@ class QuoClient:
         }
 
         try:
-            response = requests.post(url, json=payload, headers=self.headers)
+            response = self._request("post", url, json=payload)
             response.raise_for_status()
             return response.json()
         except requests.exceptions.RequestException as e:
@@ -363,7 +371,7 @@ class QuoClient:
         url = f"{self.base_url}/messages/{message_id}"
 
         try:
-            response = requests.get(url, headers=self.headers)
+            response = self._request("get", url)
             response.raise_for_status()
             return response.json()
         except requests.exceptions.RequestException as e:
@@ -395,7 +403,7 @@ class QuoClient:
             params["channel"] = channel
 
         try:
-            response = requests.get(url, params=params, headers=self.headers)
+            response = self._request("get", url, params=params)
             response.raise_for_status()
             return response.json()
         except requests.exceptions.RequestException as e:
@@ -413,7 +421,7 @@ class QuoClient:
         payload = {"phone": phone_number}
 
         try:
-            response = requests.post(url, json=payload, headers=self.headers)
+            response = self._request("post", url, json=payload)
             response.raise_for_status()
             return response.json()
         except requests.exceptions.RequestException as e:
@@ -425,7 +433,7 @@ class QuoClient:
         url = f"{self.base_url}/account"
 
         try:
-            response = requests.get(url, headers=self.headers)
+            response = self._request("get", url)
             response.raise_for_status()
             return response.json()
         except requests.exceptions.RequestException as e:
@@ -495,7 +503,7 @@ if __name__ == "__main__":
     # Test the client
     import os
 
-    api_key = os.getenv("QUO_API_KEY", "your_quo_api_key_here")
+    api_key = os.getenv("QUO_API_KEY")
 
     if api_key:
         client = QuoClient(api_key)

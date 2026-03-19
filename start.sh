@@ -3,7 +3,9 @@
 echo "🤖 Starting RAG Bot..."
 
 # Activate virtual environment
-if [ -f venv/bin/activate ]; then
+if [ -f .venv/bin/activate ]; then
+    source .venv/bin/activate
+elif [ -f venv/bin/activate ]; then
     source venv/bin/activate
 else
     echo "❌ Virtual environment not found! Please run ./setup.sh first."

@@ -18,6 +18,9 @@ echo -e "${GREEN}║   Optimized for Voice AI Integration            ║${NC}"
 echo -e "${GREEN}╚══════════════════════════════════════════════════╝${NC}"
 echo ""
 
+ASTERISK_SIP_PASSWORD="${ASTERISK_SIP_PASSWORD:-$(openssl rand -hex 12)}"
+ASTERISK_AMI_PASSWORD="${ASTERISK_AMI_PASSWORD:-$(openssl rand -hex 12)}"
+
 # Check if running as root
 if [[ $EUID -ne 0 ]]; then
    echo -e "${RED}This script must be run as root (use sudo)${NC}"
@@ -142,7 +145,7 @@ rtpend=20000
 ; Test extension
 [1000]
 type=friend
-secret=<generated_during_install>
+secret=$ASTERISK_SIP_PASSWORD
 host=dynamic
 context=voice-ai-agent
 EOF
@@ -179,7 +182,7 @@ port = 5038
 bindaddr = 0.0.0.0
 
 [admin]
-secret = <generated_during_install>
+secret = $ASTERISK_AMI_PASSWORD
 read = all
 write = all
 EOF
@@ -240,14 +243,14 @@ SIP Configuration:
 Server:   $PUBLIC_IP
 Port:     5060
 Username: 1000
-Password: <generated_during_install>
+Password: $ASTERISK_SIP_PASSWORD
 
 Manager Interface (AMI):
 -----------------------
 Host:     $PUBLIC_IP
 Port:     5038
 Username: admin
-Password: <generated_during_install>
+Password: $ASTERISK_AMI_PASSWORD
 
 Test Extensions:
 ---------------

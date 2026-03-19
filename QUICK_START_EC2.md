@@ -60,7 +60,7 @@ After installation completes, you'll see connection details:
 ```
 SIP Server:   xx.xx.xx.xx
 Username:     1000
-Password:     <generated_during_install>
+Password:     <generated during install>
 ```
 
 Test with a SIP client (Linphone, Zoiper, etc.)
@@ -101,7 +101,7 @@ ASTERISK_SERVER_IP=your-ec2-public-ip
 ASTERISK_AMI_HOST=your-ec2-public-ip
 ASTERISK_AMI_PORT=5038
 ASTERISK_AMI_USER=admin
-ASTERISK_AMI_PASSWORD=<generated_during_install>
+ASTERISK_AMI_PASSWORD=<generated during install>
 ```
 
 ### Step 2: Create Voice Processing Endpoint
@@ -190,7 +190,7 @@ sudo systemctl restart ragbot.service
 2. Configure:
    - Server: your-ec2-ip
    - Username: 1000
-   - Password: <generated_during_install>
+   - Password: generated during install
 3. Register
 4. Call extension 1000
 

@@ -4,6 +4,8 @@ Using python-telegram-bot library
 """
 import os
 import logging
+import tempfile
+from pathlib import Path
 from telegram import Update
 from telegram.ext import (
     Application,
@@ -176,7 +178,10 @@ Keep learning! 💪"""
 
             # Download file
             file = await document.get_file()
-            file_path = f"/tmp/{document.file_name}"
+            suffix = Path(document.file_name or "upload").suffix or ".bin"
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as handle:
+                file_path = handle.name
+
             await file.download_to_drive(file_path)
 
             # Process document (you'll need to implement this)
@@ -192,6 +197,9 @@ Keep learning! 💪"""
             await update.message.reply_text(
                 "Sorry, I couldn't process that document. Please try again."
             )
+        finally:
+            if 'file_path' in locals() and os.path.exists(file_path):
+                os.unlink(file_path)
 
     def run(self):
         """Run the bot"""

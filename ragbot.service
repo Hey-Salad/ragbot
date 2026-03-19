@@ -8,8 +8,8 @@ Type=simple
 User=admin
 Group=admin
 WorkingDirectory=/home/admin/ragbot
-Environment=PATH=/home/admin/ragbot/venv/bin
-ExecStart=/home/admin/ragbot/venv/bin/python main.py
+Environment=PATH=/home/admin/ragbot/.venv/bin
+ExecStart=/home/admin/ragbot/.venv/bin/python main.py
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=always
 RestartSec=10

@@ -83,7 +83,8 @@ class VoiceAgent:
         """
         try:
             if not output_path:
-                output_path = tempfile.mktemp(suffix=".mp3")
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as handle:
+                    output_path = handle.name
 
             # Generate audio using 11Labs
             audio = generate(

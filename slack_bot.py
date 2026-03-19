@@ -111,7 +111,11 @@ _Powered by FlexaAI RAG System_
                     headers = {'Authorization': f'Bearer {self.config.SLACK_BOT_TOKEN}'}
                     
                     import requests
-                    response = requests.get(file_url, headers=headers)
+                    response = requests.get(
+                        file_url,
+                        headers=headers,
+                        timeout=self.config.REQUEST_TIMEOUT_SECONDS,
+                    )
                     
                     if response.status_code == 200:
                         # Add to RAG system
